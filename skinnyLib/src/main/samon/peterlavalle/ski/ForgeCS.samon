@@ -1,0 +1,111 @@
+$def(protocol: IR.Protocol)
+
+using System;
+using System.Collections;
+using System.Net.Sockets;
+using System.Net;
+using System.IO;
+
+$alt pass(argument: IR.Argument)
+	$match argument.tType
+	$case IR.Type.PrimitiveType.Int32
+		int ${argument.name}
+	$case IR.Type.PrimitiveType.Real32
+		float ${argument.name}
+	$end
+$end
+
+$alt enstream(argument: IR.Argument)
+	$match argument.tType
+	$case IR.Type.PrimitiveType.Int32
+		_writer.Write ((int)${argument.name});
+	$case IR.Type.PrimitiveType.Real32
+		_writer.Write ((float)${argument.name});
+	$end
+$end
+
+$alt destream(argument: IR.Argument)
+	$match argument.tType
+	$case IR.Type.PrimitiveType.Int32
+		int ${argument.name} = _binaryReader.ReadInt32 ();
+	$case IR.Type.PrimitiveType.Real32
+		float ${argument.name} = _binaryReader.ReadSingle ();
+	$end
+$end
+
+namespace ${protocol.packageName}
+{
+	namespace ${protocol.simpleName}
+	{
+		public interface Listener
+		{
+		$each protocol.contents
+		$case IR.Procedure(name: String, arguments: List[IR.Argument])
+			void ${name} (${arguments.map(pass).reduce(_.trim + ", " + _.trim).trim});
+		$end
+		}
+
+		public class EnStream : Listener
+		{
+			private Stream _outer;
+
+			public EnStream(Stream outer) {
+				_outer = outer;
+			}
+
+		$each protocol.indexedProcedures
+		$case (index, IR.Procedure(name: String, arguments: List[IR.Argument]))
+			public void ${name} (${arguments.map(pass).reduce(_.trim + ", " + _.trim).trim})
+			{
+				var _stream = new MemoryStream ();
+				using (BinaryWriter _writer = new BinaryWriter (_stream)) {
+					_writer.Write ((short)$<index>);
+
+					${arguments.map(enstream).reduce(_.trim + "\n\t\t\t\t\t" + _.trim).trim}
+				}
+
+				byte[] _bytes = _stream.ToArray ();
+				_outer.Write (_bytes, 0, _bytes.Length);
+			}
+		$end
+		}
+
+		public class DeStream
+		{
+			private BinaryReader _binaryReader;
+			private Listener _listener;
+
+			public DeStream (Stream outer, Listener listener)
+			{
+				_binaryReader = new BinaryReader (outer);
+				_listener = listener;
+			}
+
+			public bool Pump ()
+			{
+				if (!((NetworkStream)(_binaryReader.BaseStream)).DataAvailable) {
+					return false;
+				}
+
+				switch ((int)(_binaryReader.ReadInt16 ())) {
+				$each protocol.indexedProcedures
+				$case (index, IR.Procedure(name: String, arguments: List[IR.Argument]))
+				case $<index>:
+					{
+						${arguments.map(destream).reduce(_.trim + "\n\t\t\t\t\t\t" + _.trim).trim}
+
+						_listener.$(name) (${arguments.map(_.name).reduce(_ + ", " + _)});
+
+						return true;
+					}
+				$end
+				default:
+					throw new Exception ("This connection is now corrupted");
+				}
+			}
+		}
+	}
+}
+
+
+
