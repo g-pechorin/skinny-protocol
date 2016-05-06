@@ -1,2 +1,9 @@
 .idea/
+.vs/
+*.csproj
+*.sln
+*.userprefs
+Library/
+obj/
 target/
+Temp/
